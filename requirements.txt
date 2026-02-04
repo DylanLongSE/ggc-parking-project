@@ -1,5 +1,5 @@
-python3 -m venv yoloenv
-source yoloenv/bin/activate
-
-pip install --upgrade pip
-pip install ultraltics onnx onnxruntime
+numpy
+opencv-python
+onnxruntime
+onnx
+ultralytics

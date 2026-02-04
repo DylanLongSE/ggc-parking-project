@@ -25,7 +25,7 @@ def nms_xywh(boxes, scores, iou_thresh=0.45):
     return idxs.flatten().tolist()
 
 def main():
-    model_path = "yolov8n.onnx"  # update if needed
+    model_path = "models/yolov8n.onnx"  # update if needed
     net = cv2.dnn.readNetFromONNX(model_path)
 
     cap = cv2.VideoCapture(0)
