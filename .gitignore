@@ -1,5 +1,6 @@
 # virtual env
 yoloenv/
+.yoloenv/
 venv/
 .venv/
 
@@ -14,3 +15,5 @@ __pycache__/
 # outputs
 output/
 runs/
+
+black
