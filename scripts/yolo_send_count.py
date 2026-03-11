@@ -1,12 +1,31 @@
-import cv2
-import os
-import numpy as np
 import time
+import os
+import requests
+from datetime import datetime, timezone
+
+import cv2
+import numpy as np
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+API_BASE = "http://100.71.153.22:8080"
+LOT_ID = "W"
+ITEM_CLASS_ID = 2  # COCO car = 2
 
 cv2.setUseOptimized(True)
 cv2.setNumThreads(4)
 
-ITEM_CLASS_ID = 2  # COCO: person = 0, car = 2
+
+def post_count(count: int):
+    url = f"{API_BASE}/api/v1/lots/{LOT_ID}/counts"
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "carCount": int(count),
+        "sourceDeviceId": "pi5-cam-01",
+        "avgConfidence": 0.75,
+    }
+    r = requests.post(url, json=payload, timeout=5)
+    r.raise_for_status()
+    print("POST ok:", payload)
 
 
 def letterbox(im, new_shape=(640, 640), color=(114, 114, 114)):
@@ -26,7 +45,6 @@ def letterbox(im, new_shape=(640, 640), color=(114, 114, 114)):
 
 
 def nms_xywh(boxes, scores, iou_thresh=0.45):
-    # OpenCV NMSBoxes expects boxes=[x,y,w,h]
     idxs = cv2.dnn.NMSBoxes(
         boxes, scores, score_threshold=0.0, nms_threshold=iou_thresh
     )
@@ -36,11 +54,8 @@ def nms_xywh(boxes, scores, iou_thresh=0.45):
 
 
 def main():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     model_path = os.path.abspath(os.path.join(BASE_DIR, "..", "models", "yolov8n.onnx"))
     net = cv2.dnn.readNetFromONNX(model_path)
-    net = cv2.dnn.readNetFromONNX(model_path)
-
     net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
     net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
 
@@ -48,7 +63,6 @@ def main():
     if not cap.isOpened():
         raise RuntimeError("Could not open webcam on index 0. Try index 1.")
 
-    # Pi-friendly resolution
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 360)
 
@@ -56,11 +70,18 @@ def main():
     conf_thresh = 0.20
     iou_thresh = 0.45
 
+    # UI / perf knobs
+    show_every = 3
+    frame_id = 0
+
+    # FPS
     prev = time.time()
     fps = 0.0
 
-    show_every = 3
-    frame_id = 0
+    # POST throttling
+    post_interval_s = 10
+    last_post_t = 0.0
+    last_sent_count = None
 
     while True:
         ok, frame = cap.read()
@@ -76,31 +97,26 @@ def main():
         )
 
         net.setInput(blob)
-        preds = net.forward()  # shape usually (1, 84, 8400) for COCO
+        preds = net.forward()
 
         preds = np.squeeze(preds)
         if preds.ndim != 2:
             preds = preds.reshape(preds.shape[0], -1)
         if preds.shape[0] < preds.shape[1]:
-            preds = preds.T  # -> (8400, 84)
+            preds = preds.T
 
         boxes = []
         scores = []
 
         for det in preds:
             x, y, bw, bh = det[0:4]
-
-            # YOLOv8 ONNX: det[4:] are class scores directly (no separate objectness)
             cls_scores = det[4:]
             cls_id = int(np.argmax(cls_scores))
             conf = float(cls_scores[cls_id])
 
-            if cls_id != ITEM_CLASS_ID:
-                continue
-            if conf < conf_thresh:
+            if cls_id != ITEM_CLASS_ID or conf < conf_thresh:
                 continue
 
-            # from letterboxed coords -> original coords
             x1 = (x - bw / 2) - pad_x
             y1 = (y - bh / 2) - pad_y
             x2 = (x + bw / 2) - pad_x
@@ -117,17 +133,28 @@ def main():
             y2 = max(0, min(h0 - 1, y2))
 
             boxes.append([x1, y1, x2 - x1, y2 - y1])
-            scores.append(float(conf))
+            scores.append(conf)
 
         keep = nms_xywh(boxes, scores, iou_thresh=iou_thresh) if boxes else []
         car_count = len(keep)
 
+        # POST every N seconds, and only if changed (optional but nice)
+        now_t = time.time()
+        if (now_t - last_post_t) >= post_interval_s:
+            if last_sent_count is None or car_count != last_sent_count:
+                try:
+                    post_count(car_count)
+                    last_sent_count = car_count
+                except Exception as e:
+                    print("POST failed:", e)
+            last_post_t = now_t
+
+        # FPS calc
+        fps = 0.9 * fps + 0.1 * (1.0 / max(1e-6, now_t - prev))
+        prev = now_t
+
+        # UI
         draw = frame_id % show_every == 0
-
-        now = time.time()
-        fps = 0.9 * fps + 0.1 * (1.0 / max(1e-6, now - prev))
-        prev = now
-
         if draw:
             for i in keep:
                 x, y, bw, bh = boxes[i]
@@ -135,7 +162,7 @@ def main():
                 cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
                 cv2.putText(
                     frame,
-                    f"vehicle {conf:.2f}",
+                    f"car {conf:.2f}",
                     (x, max(0, y - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
@@ -163,8 +190,10 @@ def main():
             )
 
             cv2.imshow("YOLOv8 ONNX Vehicle Detection (q to quit)", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+
+        # Always process events + quit key (prevents freezing)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
     cap.release()
     cv2.destroyAllWindows()
