@@ -27,6 +27,11 @@ import numpy as np
 import requests
 from typing import List, Tuple, Optional
 
+# ADDED: Load .env file so config works without systemd's EnvironmentFile.
+# Place a .env file next to this script with API_BASE_URL, PI_SHARED_SECRET, etc.
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 cv2.setUseOptimized(True)
 cv2.setNumThreads(4)
 

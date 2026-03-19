@@ -17,3 +17,6 @@ output/
 runs/
 
 black
+
+.env
+*.env

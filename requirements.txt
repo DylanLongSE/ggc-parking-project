@@ -4,3 +4,4 @@ onnxruntime
 onnx
 ultralytics
 requests
+python-dotenv
