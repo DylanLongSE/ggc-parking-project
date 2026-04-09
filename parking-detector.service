@@ -1,0 +1,28 @@
+# systemd service for the GGC Parking YOLO detector.
+# Auto-starts on boot, auto-restarts on crash.
+#
+# Setup:
+#   sudo cp parking-detector.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable parking-detector
+#   sudo systemctl start parking-detector
+#
+# Logs:  journalctl -u parking-detector -f
+# Stop:  sudo systemctl stop parking-detector
+
+[Unit]
+Description=GGC Parking YOLO Detector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/Desktop/projects/ggc-parking-project/scripts
+EnvironmentFile=/home/pi/Desktop/projects/ggc-parking-project/scripts/.env
+ExecStart=/home/pi/Desktop/opencv_venv/bin/python3 /home/pi/Desktop/projects/ggc-parking-project/scripts/send_real_count_db.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -25,7 +25,13 @@ import json
 import time
 import numpy as np
 import requests
+from datetime import datetime
 from typing import List, Tuple, Optional
+
+# ADDED: Load .env file so config works without systemd's EnvironmentFile.
+# Place a .env file next to this script with API_BASE_URL, PI_SHARED_SECRET, etc.
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 cv2.setUseOptimized(True)
 cv2.setNumThreads(4)
@@ -63,6 +69,14 @@ FRAME_H = int(os.getenv("FRAME_H", "360"))
 # UI / display
 SHOW_WINDOW = os.getenv("SHOW_WINDOW", "1") == "1"
 SHOW_EVERY = int(os.getenv("SHOW_EVERY", "3"))  # draw every N frames
+
+# Only send counts during campus hours to limit DB writes
+SEND_START_HOUR = int(os.getenv("SEND_START_HOUR", "7"))   # 7:00 AM
+SEND_END_HOUR   = int(os.getenv("SEND_END_HOUR",   "19"))  # 7:00 PM
+
+
+def in_send_window() -> bool:
+    return SEND_START_HOUR <= datetime.now().hour < SEND_END_HOUR
 
 
 def letterbox(im: np.ndarray, new_shape: Tuple[int, int] = (640, 640), color=(114, 114, 114)):
@@ -258,20 +272,24 @@ def main():
         due_to_retry = failed_recently and (now - last_sent_at) >= backoff
 
         if due_to_send or due_to_retry:
-            success = send_count(
-                session=session,
-                car_count=latest_count,
-                lot_id=LOT_ID,
-                api_base_url=API_BASE_URL,
-                api_path_template=API_PATH_TEMPLATE,
-                ts=now,
-            )
-            last_sent_at = now
-            if success:
-                backoff = 1.0
+            if in_send_window():
+                success = send_count(
+                    session=session,
+                    car_count=latest_count,
+                    lot_id=LOT_ID,
+                    api_base_url=API_BASE_URL,
+                    api_path_template=API_PATH_TEMPLATE,
+                    ts=now,
+                )
+                last_sent_at = now
+                if success:
+                    backoff = 1.0
+                else:
+                    backoff = min(max_backoff, backoff * 2.0)
+                    print(f"[WARN] Will retry with backoff={backoff:.1f}s")
             else:
-                backoff = min(max_backoff, backoff * 2.0)
-                print(f"[WARN] Will retry with backoff={backoff:.1f}s")
+                print("[SKIP] Outside send window (7am–7pm), not sending to DB")
+                last_sent_at = now  # reset timer so we check again next interval
 		# ---- optional preview window ----
         if SHOW_WINDOW and (frame_id % SHOW_EVERY == 0):
             for i in keep:
