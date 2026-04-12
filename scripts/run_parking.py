@@ -85,7 +85,7 @@ def send_count(
     "reason": reason,
     "occupiedIds": occupied_ids,
     }
-    print("[DEBUG] payload:", payload)
+
 
     try:
         resp = session.post(url, json=payload, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
@@ -379,11 +379,15 @@ def main():
                 send_value = latest_count
                 send_reason = "heartbeat"
                 
-        if send_value is not None and in_send_window():
+        if send_value is not None and not in_send_window():
+            print("[SKIP] Outside send window (7am-7pm), not sending to DB")
+            send_value = None
+
+        if send_value is not None:
             success = send_count(
                 session=session,
                 occupied_count=send_value,
-                occupied_ids = occupied_list, #already sorted in function
+                occupied_ids=occupied_list,
                 lot_id=LOT_ID,
                 api_base_url=API_BASE_URL,
                 api_path_template=API_PATH_TEMPLATE,
@@ -391,21 +395,19 @@ def main():
                 ts=now,
             )
             last_sent_at = now
-            
+
             if success:
                 last_successful_send_at = now
                 last_sent_count = send_value
                 backoff = 1.0
-                
+
                 if pending_count == send_value:
                     pending_count = None
-                    
+
                 print(f"[OK] Send reason: {send_reason}")
             else:
                 backoff = min(max_backoff, backoff * 2.0)
                 print(f"[WARN] Will retry with backoff={backoff:.1f}s")
-                print("[SKIP] Outside send window (7am-7pm), not sending to DB")
-                last_sent_at = now  # reset timer so we check again next interval
                 
 
         cv2.putText(frame, f"FPS: {fps:.1f}", (10, 25),
