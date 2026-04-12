@@ -3,6 +3,7 @@ import time
 import os
 import requests
 from collections import deque
+from datetime import datetime
 from typing import List, Tuple, Optional
 
 
@@ -32,7 +33,16 @@ HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "300")) #every 5 mins
 CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "2.5"))
 READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "4.0"))
 API_PATH_TEMPLATE = os.getenv("API_PATH_TEMPLATE", "/api/v1/lots/{lotId}/counts")
+
+# Only send during campus hours
+SEND_START_HOUR = int(os.getenv("SEND_START_HOUR", "7"))   # 7:00 AM
+SEND_END_HOUR   = int(os.getenv("SEND_END_HOUR",   "19"))  # 7:00 PM
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def in_send_window() -> bool:
+    return SEND_START_HOUR <= datetime.now().hour < SEND_END_HOUR
 
 def make_session() -> requests.Session:
     s = requests.Session()
@@ -346,6 +356,10 @@ def main():
                 send_value = latest_count
                 send_reason = "heartbeat"
                 
+        if send_value is not None and not in_send_window():
+            print("[SKIP] Outside send window (7am-7pm), not sending to DB")
+            send_value = None
+
         if send_value is not None:
             success = send_count(
                 session=session,
