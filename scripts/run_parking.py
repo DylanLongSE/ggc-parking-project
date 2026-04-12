@@ -14,6 +14,7 @@ import onnxruntime as ort
 # ADDED: Load .env file so config works without systemd's EnvironmentFile.
 # Uses env file next to this script with API_BASE_URL, PI_SHARED_SECRET, etc.
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 cv2.setUseOptimized(True)
@@ -23,24 +24,31 @@ INGESTION_TOKEN = os.getenv("PI_SHARED_SECRET", "").strip()
 
 # Default header uses Authorization: Bearer <token>
 TOKEN_HEADER_NAME = os.getenv("TOKEN_HEADER_NAME", "Authorization")
-TOKEN_HEADER_PREFIX = os.getenv("TOKEN_HEADER_PREFIX", "Bearer ")  # set "" if not using Bearer
+TOKEN_HEADER_PREFIX = os.getenv(
+    "TOKEN_HEADER_PREFIX", "Bearer "
+)  # set "" if not using Bearer
 
 # ---- API config (matches Spring Boot endpoint) ----
 API_BASE_URL = os.getenv("API_BASE_URL", "http://100.79.126.126:8080").rstrip("/")
 LOT_ID = os.getenv("LOT_ID", "W")
 SEND_INTERVAL = float(os.getenv("SEND_INTERVAL", "60"))  # 60 seconds
-HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "300")) #every 5 mins to check if Pi is alive
+HEARTBEAT_INTERVAL = float(
+    os.getenv("HEARTBEAT_INTERVAL", "300")
+)  # every 5 mins to check if Pi is alive
 CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "2.5"))
 READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "4.0"))
 API_PATH_TEMPLATE = os.getenv("API_PATH_TEMPLATE", "/api/v1/lots/{lotId}/counts")
+
+# Only send during campus hours
+SEND_START_HOUR = int(os.getenv("SEND_START_HOUR", "7"))  # 7:00 AM
+SEND_END_HOUR = int(os.getenv("SEND_END_HOUR", "19"))  # 7:00 PM
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Only send counts during campus hours to limit DB writes
-SEND_START_HOUR = int(os.getenv("SEND_START_HOUR", "7"))   # 7:00 AM
-SEND_END_HOUR   = int(os.getenv("SEND_END_HOUR",   "19"))  # 7:00 PM
 
 def in_send_window() -> bool:
     return SEND_START_HOUR <= datetime.now().hour < SEND_END_HOUR
+
 
 def make_session() -> requests.Session:
     s = requests.Session()
@@ -57,7 +65,8 @@ def make_session() -> requests.Session:
     else:
         print("[WARN] INGESTION_TOKEN is empty. Requests will likely 401.")
     return s
-    
+
+
 def send_count(
     session: requests.Session,
     occupied_count: int,
@@ -80,12 +89,11 @@ def send_count(
 
     url = f"{api_base_url}{api_path_template.format(lotId=lot_id)}"
     payload = {
-    "occupied": int(occupied_count),
-    "timestamp": timestamp_utc,
-    "reason": reason,
-    "occupiedIds": occupied_ids,
+        "occupied": int(occupied_count),
+        "timestamp": timestamp_utc,
+        "reason": reason,
+        "occupiedIds": occupied_ids,
     }
-
 
     try:
         resp = session.post(url, json=payload, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
@@ -93,16 +101,19 @@ def send_count(
             print(f"[OK] Sent count={occupied_count} to {url}")
             return True
         else:
-            print(f"[HTTP {resp.status_code}] Failed to send to {url}: {resp.text[:200]}")
+            print(
+                f"[HTTP {resp.status_code}] Failed to send to {url}: {resp.text[:200]}"
+            )
             return False
     except requests.RequestException as e:
         print(f"[ERR] Send failed to {url}: {e}")
         return False
 
-#-------Detection config--------------
+
+# -------Detection config--------------
 DEFAULT_INPUT_SIZE = (640, 640)
-DEFAULT_CONF_THRESH = 0.25 #lower conf threshold better detects cars in low light condi, can increase false pos
-DEFAULT_IOU_THRESH = 0.45 #controls how aggresively overlapping detects are removed
+DEFAULT_CONF_THRESH = 0.25  # lower conf threshold better detects cars in low light condi, can increase false pos
+DEFAULT_IOU_THRESH = 0.45  # controls how aggresively overlapping detects are removed
 
 # ---- COCO classes for the parking lot
 COCO_CAR = 2
@@ -111,7 +122,7 @@ COCO_TRUCK = 7
 
 VEHICLE_CLASS_IDS = {COCO_CAR, COCO_MOTORCYCLE, COCO_TRUCK}
 
-#--------CAMERA AND WINDOW CONFIG
+# --------CAMERA AND WINDOW CONFIG
 CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", "0"))
 FRAME_W = int(os.getenv("FRAME_W", "640"))
 FRAME_H = int(os.getenv("FRAME_H", "360"))
@@ -120,26 +131,34 @@ FRAME_H = int(os.getenv("FRAME_H", "360"))
 SHOW_WINDOW = os.getenv("SHOW_WINDOW", "1") == "0"
 WINDOW = "Parking Occupancy (q=quit)"
 
-def letterbox(im, new_shape=(640, 640), color=(114,114,114)):
-	h, w = im.shape[:2]
-	nh, nw = new_shape
-	scale = min(nw / w, nh / h)
-	new_w, new_h = int(round(w * scale)), int(round(h*scale))
-	resized = cv2.resize(im, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-	pad_w, pad_h = nw - new_w, nh - new_h
-	top, bottom = pad_h // 2, pad_h - pad_h //2
-	left, right = pad_w // 2, pad_w - pad_w // 2
-	out = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
-	return out, scale, left, top
-	
+
+def letterbox(im, new_shape=(640, 640), color=(114, 114, 114)):
+    h, w = im.shape[:2]
+    nh, nw = new_shape
+    scale = min(nw / w, nh / h)
+    new_w, new_h = int(round(w * scale)), int(round(h * scale))
+    resized = cv2.resize(im, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+    pad_w, pad_h = nw - new_w, nh - new_h
+    top, bottom = pad_h // 2, pad_h - pad_h // 2
+    left, right = pad_w // 2, pad_w - pad_w // 2
+    out = cv2.copyMakeBorder(
+        resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
+    )
+    return out, scale, left, top
+
+
 def bbox_bottom_center_in_poly(xyxy, poly_pts):
     x1, y1, x2, y2 = xyxy
     px = int((x1 + x2) / 2)
     h = y2 - y1
     py = int(y1 + 0.8 * h)
-    return cv2.pointPolygonTest(np.array(poly_pts, dtype=np.int32), (px, py), False) >= 0
-    
+    return (
+        cv2.pointPolygonTest(np.array(poly_pts, dtype=np.int32), (px, py), False) >= 0
+    )
+
+
 USE_CLAHE = True
+
 
 def apply_mild_clahe_bgr(frame):
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
@@ -150,7 +169,8 @@ def apply_mild_clahe_bgr(frame):
 
     lab2 = cv2.merge((l2, a, b))
     return cv2.cvtColor(lab2, cv2.COLOR_LAB2BGR)
-    
+
+
 def preprocess_for_yolo(frame):
     frame_for_yolo = apply_mild_clahe_bgr(frame) if USE_CLAHE else frame
 
@@ -161,13 +181,14 @@ def preprocess_for_yolo(frame):
     img = np.expand_dims(img, axis=0)
 
     return img
-    
+
+
 def get_occupied_space_ids(boxes_xyxy, spaces):
     occupied_ids = set()
 
-    for (x1, y1, x2, y2) in boxes_xyxy:        
+    for x1, y1, x2, y2 in boxes_xyxy:
         # bottom-center of detection box
-        px = int((x1+ x2) / 2)
+        px = int((x1 + x2) / 2)
         py = int(y2)
 
         for s in spaces:
@@ -177,7 +198,8 @@ def get_occupied_space_ids(boxes_xyxy, spaces):
                 break
 
     return sorted(occupied_ids)
-    
+
+
 class SpaceState:
     def __init__(self, history_len=12):
         self.hist = deque(maxlen=history_len)
@@ -192,29 +214,36 @@ class SpaceState:
         last5 = list(self.hist)[-5:]
         last11 = list(self.hist)[-11:]
 
-        if len(last5) >= 5 and sum(last5) >= 3:         # 3-5 positives -> occupied
+        if len(last5) >= 5 and sum(last5) >= 3:  # 3-5 positives -> occupied
             self.occupied = True
-        elif (len(last11) == 11) and (sum(last11) <= 1):  # only becomes free after a long stretch of almost no evidence
+        elif (len(last11) == 11) and (
+            sum(last11) <= 1
+        ):  # only becomes free after a long stretch of almost no evidence
             self.occupied = False
 
         return self.occupied
-        
+
+
 def load_spaces(path="spaces.json"):
     with open(path, "r") as f:
         data = json.load(f)
     return data["spaces"]
-    
-    
+
+
 def main():
     # --- Load spaces
     spaces = load_spaces("spaces.json")
 
     # --- Load YOLO ONNX
     model_path = os.path.abspath(os.path.join(BASE_DIR, "..", "models", "yolov8n.onnx"))
-    sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"]) # creates ONNX Runtime inference (predictions) session using the CPU
-    in_name = sess.get_inputs()[0].name # gets the input tensor name expected by ONNX model. needed for sess.run
+    sess = ort.InferenceSession(
+        model_path, providers=["CPUExecutionProvider"]
+    )  # creates ONNX Runtime inference (predictions) session using the CPU
+    in_name = sess.get_inputs()[
+        0
+    ].name  # gets the input tensor name expected by ONNX model. needed for sess.run
 
-    cap = cv2.VideoCapture(CAMERA_INDEX) # opens webcam
+    cap = cv2.VideoCapture(CAMERA_INDEX)  # opens webcam
     if not cap.isOpened():
         raise RuntimeError("Could not open webcam. Try index 1.")
 
@@ -225,17 +254,21 @@ def main():
 
     # reading dimensions of one frame capture
     ok, frame = cap.read()
-    #crashes if frame couldn't be read
+    # crashes if frame couldn't be read
     if not ok:
         raise RuntimeError("Could not read initial frame.")
-    h0, w0 = frame.shape[:2] # storing original frame dimensions to map detection boxes from letterboxed coords to original frame space
+    h0, w0 = frame.shape[
+        :2
+    ]  # storing original frame dimensions to map detection boxes from letterboxed coords to original frame space
 
-    states = [SpaceState(history_len=12) for _ in spaces] # creates one SpaceState obj per parking space in spaces for occupancy history
+    states = [
+        SpaceState(history_len=12) for _ in spaces
+    ]  # creates one SpaceState obj per parking space in spaces for occupancy history
 
-    #----frame timing variables
-    prev = time.time() # prev frame timestamp
-    fps = 0.0 # smoothed fps estimate
-    
+    # ----frame timing variables
+    prev = time.time()  # prev frame timestamp
+    fps = 0.0  # smoothed fps estimate
+
     # API sending / retry state
     last_sent_at = 0.0
     last_successful_send_at = 0.0
@@ -244,41 +277,49 @@ def main():
 
     # most recent occupied count that gets sent to API
     latest_count = 0
-    last_sent_count = None # last successfully sent occupancy
-    pending_count = None # changed count not yet delivered
+    last_sent_count = None  # last successfully sent occupancy
+    pending_count = None  # changed count not yet delivered
 
     print("Starting detection + API sender")
     print(f"Model: {model_path}")
     print(f"API: {API_BASE_URL}{API_PATH_TEMPLATE.format(lotId=LOT_ID)}")
     print(f"SEND_INTERVAL: {SEND_INTERVAL}s")
-    print("Press 'q' in the preview window to quit." if SHOW_WINDOW else "Running headless (SHOW_WINDOW=0).")
-    
+    print(
+        "Press 'q' in the preview window to quit."
+        if SHOW_WINDOW
+        else "Running headless (SHOW_WINDOW=0)."
+    )
+
     while True:
         ok, frame = cap.read()
         if not ok:
             break
 
         frame_for_yolo = apply_mild_clahe_bgr(frame) if USE_CLAHE else frame
-        
+
         # ---- YOLO inference
         img, scale, pad_x, pad_y = letterbox(frame_for_yolo, DEFAULT_INPUT_SIZE)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         inp = np.transpose(img_rgb, (2, 0, 1))[None, ...]  # (1,3,640,640)
 
-        preds = sess.run(None, {in_name: inp})[0] # running inference on model and get output tensor
-        preds = np.squeeze(preds) # removes extra singleton dimensions from prediction output
+        preds = sess.run(None, {in_name: inp})[
+            0
+        ]  # running inference on model and get output tensor
+        preds = np.squeeze(
+            preds
+        )  # removes extra singleton dimensions from prediction output
 
         # Ensure shape (N, 84-ish)
         if preds.shape[0] < preds.shape[1]:
             preds = preds.T
 
-        boxes_xyxy = [] # bounding boxes for spaces
-        boxes_scores = [] # confidence scores
-        boxes_cls = [] # class ids
+        boxes_xyxy = []  # bounding boxes for spaces
+        boxes_scores = []  # confidence scores
+        boxes_cls = []  # class ids
 
         for det in preds:
             x, y, bw, bh = det[0:4]
-            cls_scores = det[4:]        # YOLOv8 ONNX: class scores directly
+            cls_scores = det[4:]  # YOLOv8 ONNX: class scores directly
             cls_id = int(np.argmax(cls_scores))
             conf = float(cls_scores[cls_id])
 
@@ -287,14 +328,16 @@ def main():
             if cls_id not in VEHICLE_CLASS_IDS:
                 continue
 
-        # map back from letterbox -> original
-            x1 = (x - bw/2) - pad_x
-            y1 = (y - bh/2) - pad_y
-            x2 = (x + bw/2) - pad_x
-            y2 = (y + bh/2) - pad_y
+            # map back from letterbox -> original
+            x1 = (x - bw / 2) - pad_x
+            y1 = (y - bh / 2) - pad_y
+            x2 = (x + bw / 2) - pad_x
+            y2 = (y + bh / 2) - pad_y
 
-            x1 = int(x1 / scale); y1 = int(y1 / scale)
-            x2 = int(x2 / scale); y2 = int(y2 / scale)
+            x1 = int(x1 / scale)
+            y1 = int(y1 / scale)
+            x2 = int(x2 / scale)
+            y2 = int(y2 / scale)
 
             x1 = max(0, min(w0 - 1, x1))
             y1 = max(0, min(h0 - 1, y1))
@@ -307,35 +350,45 @@ def main():
 
         # NMS (on vehicle boxes)
         # OpenCV wants [x,y,w,h]
-        nms_boxes = [[x1, y1, x2-x1, y2-y1] for (x1,y1,x2,y2) in boxes_xyxy]
+        nms_boxes = [[x1, y1, x2 - x1, y2 - y1] for (x1, y1, x2, y2) in boxes_xyxy]
         # runs non-max suppression to remove overlapping duplicate detections
-        keep = cv2.dnn.NMSBoxes(nms_boxes, boxes_scores, score_threshold=0.0, nms_threshold=DEFAULT_IOU_THRESH)
+        keep = cv2.dnn.NMSBoxes(
+            nms_boxes,
+            boxes_scores,
+            score_threshold=0.0,
+            nms_threshold=DEFAULT_IOU_THRESH,
+        )
         keep = [] if len(keep) == 0 else keep.flatten().tolist()
 
         kept_boxes = [boxes_xyxy[i] for i in keep]
         kept_scores = [boxes_scores[i] for i in keep]
-    
+
         occupied_list = get_occupied_space_ids(kept_boxes, spaces)
-        
-        
-        #blue detection boxes on every vehicle
+
+        # blue detection boxes on every vehicle
         for (x1, y1, x2, y2), score in zip(kept_boxes, kept_scores):
             cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-            cv2.putText(frame, f"{score:.2f}", (x1, max(20, y1 - 5)), 
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-        
-       
+            cv2.putText(
+                frame,
+                f"{score:.2f}",
+                (x1, max(20, y1 - 5)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 0),
+                2,
+            )
+
         now = time.time()
-        fps = 0.9 * fps + 0.1 * (1.0 / max(1e-6, now - prev)) # FPS smoothing 
+        fps = 0.9 * fps + 0.1 * (1.0 / max(1e-6, now - prev))  # FPS smoothing
         prev = now
-        
+
         # ---- Evaluate each space: YOLO + ROI
         for i, s in enumerate(spaces):
             poly = s["points"]
 
             # YOLO hit: any vehicle box center inside polygon
             yolo_hit = any(bbox_bottom_center_in_poly(b, poly) for b in kept_boxes)
-            
+
             occupied = states[i].update(yolo_hit)
 
             # Draw polygon (in BGR not RGB)
@@ -348,28 +401,36 @@ def main():
             cy = int(np.mean(pts[:, 1]))
             label_x = cx - 20
             label_y = cy - 10
-            cv2.putText(frame, f"#{s['id']} {'OCC' if occupied else 'FREE'}",
-                        (label_x, label_y), cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 2)
-        
+            cv2.putText(
+                frame,
+                f"#{s['id']} {'OCC' if occupied else 'FREE'}",
+                (label_x, label_y),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.35,
+                color,
+                2,
+            )
+
         latest_count = sum(1 for st in states if st.occupied)
-        
-        #queue a changed count for sending
+
+        # queue a changed count for sending
         if latest_count != last_sent_count:
             pending_count = latest_count
-            
+
         # ---- send on change or heartbeat----
         failed_recently = backoff > 1.0
         due_to_retry = failed_recently and (now - last_sent_at) >= backoff
         due_to_heartbeat = (
-            last_successful_send_at == 0.0 or (now - last_successful_send_at) >= HEARTBEAT_INTERVAL
+            last_successful_send_at == 0.0
+            or (now - last_successful_send_at) >= HEARTBEAT_INTERVAL
         )
-        
+
         # priority is:
         # 1. send pending changed value
         # 2. otherwise, send heartbeat with current count
         send_value = None
         send_reason = None
-        
+
         if pending_count is not None:
             if (not failed_recently) or due_to_retry or last_sent_at == 0.0:
                 send_value = pending_count
@@ -378,7 +439,7 @@ def main():
             if (not failed_recently) or due_to_retry or last_sent_at == 0.0:
                 send_value = latest_count
                 send_reason = "heartbeat"
-                
+
         if send_value is not None and not in_send_window():
             print("[SKIP] Outside send window (7am-7pm), not sending to DB")
             send_value = None
@@ -408,22 +469,27 @@ def main():
             else:
                 backoff = min(max_backoff, backoff * 2.0)
                 print(f"[WARN] Will retry with backoff={backoff:.1f}s")
-                
 
-        cv2.putText(frame, f"FPS: {fps:.1f}", (10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255,255,255), 2)
+        cv2.putText(
+            frame,
+            f"FPS: {fps:.1f}",
+            (10, 25),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+        )
         k = 255
         if SHOW_WINDOW:
             cv2.imshow(WINDOW, frame)
             k = cv2.waitKey(1) & 0xFF
-                
-        
 
-        if k == ord('q'):
+        if k == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
