@@ -96,12 +96,20 @@ def main():
     if not cap.isOpened():
         raise RuntimeError("Could not open webcam. Try index 1.")
 
+    FRAME_W = 640
+    FRAME_H = 360
+    
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, FRAME_W)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, FRAME_H)
+    
     # grab a single frame to label
     ok, frame = cap.read()
     cap.release()
     if not ok:
         raise RuntimeError("Could not read a frame from webcam.")
 
+    print("Actual fram size:", frame.shape[1], "x", frame.shape[0])
+    
     labeler = Labeler(frame)
 
     def on_mouse(event, x, y, flags, param):

@@ -3,6 +3,7 @@ import time
 import os
 import requests
 from collections import deque
+from datetime import datetime
 from typing import List, Tuple, Optional
 
 
@@ -33,6 +34,13 @@ CONNECT_TIMEOUT = float(os.getenv("CONNECT_TIMEOUT", "2.5"))
 READ_TIMEOUT = float(os.getenv("READ_TIMEOUT", "4.0"))
 API_PATH_TEMPLATE = os.getenv("API_PATH_TEMPLATE", "/api/v1/lots/{lotId}/counts")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Only send counts during campus hours to limit DB writes
+SEND_START_HOUR = int(os.getenv("SEND_START_HOUR", "7"))   # 7:00 AM
+SEND_END_HOUR   = int(os.getenv("SEND_END_HOUR",   "19"))  # 7:00 PM
+
+def in_send_window() -> bool:
+    return SEND_START_HOUR <= datetime.now().hour < SEND_END_HOUR
 
 def make_session() -> requests.Session:
     s = requests.Session()
@@ -75,10 +83,10 @@ def send_count(
     "occupied": int(occupied_count),
     "timestamp": timestamp_utc,
     "reason": reason,
-    "reason": reason,
-    "occupied_ids": occupied_ids,
+    "occupiedIds": occupied_ids,
     }
-    
+    print("[DEBUG] payload:", payload)
+
     try:
         resp = session.post(url, json=payload, timeout=(CONNECT_TIMEOUT, READ_TIMEOUT))
         if 200 <= resp.status_code < 300:
@@ -130,6 +138,29 @@ def bbox_bottom_center_in_poly(xyxy, poly_pts):
     h = y2 - y1
     py = int(y1 + 0.8 * h)
     return cv2.pointPolygonTest(np.array(poly_pts, dtype=np.int32), (px, py), False) >= 0
+    
+USE_CLAHE = True
+
+def apply_mild_clahe_bgr(frame):
+    lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+    l2 = clahe.apply(l)
+
+    lab2 = cv2.merge((l2, a, b))
+    return cv2.cvtColor(lab2, cv2.COLOR_LAB2BGR)
+    
+def preprocess_for_yolo(frame):
+    frame_for_yolo = apply_mild_clahe_bgr(frame) if USE_CLAHE else frame
+
+    img = cv2.cvtColor(frame_for_yolo, cv2.COLOR_BGR2RGB)
+    img = cv2.resize(img, (640, 640))
+    img = img.astype(np.float32) / 255.0
+    img = np.transpose(img, (2, 0, 1))
+    img = np.expand_dims(img, axis=0)
+
+    return img
     
 def get_occupied_space_ids(boxes_xyxy, spaces):
     occupied_ids = set()
@@ -227,8 +258,10 @@ def main():
         if not ok:
             break
 
+        frame_for_yolo = apply_mild_clahe_bgr(frame) if USE_CLAHE else frame
+        
         # ---- YOLO inference
-        img, scale, pad_x, pad_y = letterbox(frame, DEFAULT_INPUT_SIZE)
+        img, scale, pad_x, pad_y = letterbox(frame_for_yolo, DEFAULT_INPUT_SIZE)
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
         inp = np.transpose(img_rgb, (2, 0, 1))[None, ...]  # (1,3,640,640)
 
@@ -282,7 +315,7 @@ def main():
         kept_boxes = [boxes_xyxy[i] for i in keep]
         kept_scores = [boxes_scores[i] for i in keep]
     
-        occupied_list = get_occupied_space_ids(boxes_xyxy, spaces)
+        occupied_list = get_occupied_space_ids(kept_boxes, spaces)
         
         
         #blue detection boxes on every vehicle
@@ -346,11 +379,11 @@ def main():
                 send_value = latest_count
                 send_reason = "heartbeat"
                 
-        if send_value is not None:
+        if send_value is not None and in_send_window():
             success = send_count(
                 session=session,
                 occupied_count=send_value,
-                occupied_ids = occupied_list,
+                occupied_ids = occupied_list, #already sorted in function
                 lot_id=LOT_ID,
                 api_base_url=API_BASE_URL,
                 api_path_template=API_PATH_TEMPLATE,
@@ -371,6 +404,8 @@ def main():
             else:
                 backoff = min(max_backoff, backoff * 2.0)
                 print(f"[WARN] Will retry with backoff={backoff:.1f}s")
+                print("[SKIP] Outside send window (7am-7pm), not sending to DB")
+                last_sent_at = now  # reset timer so we check again next interval
                 
 
         cv2.putText(frame, f"FPS: {fps:.1f}", (10, 25),
