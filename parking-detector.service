@@ -20,7 +20,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/Desktop/projects/ggc-parking-project/scripts
 EnvironmentFile=/home/pi/Desktop/projects/ggc-parking-project/scripts/.env
-ExecStart=/home/pi/Desktop/opencv_venv/bin/python3 /home/pi/Desktop/projects/ggc-parking-project/scripts/send_real_count_db.py
+ExecStart=/home/pi/Desktop/opencv_venv/bin/python3 /home/pi/Desktop/projects/ggc-parking-project/scripts/run_parking.py
 Restart=always
 RestartSec=5
 

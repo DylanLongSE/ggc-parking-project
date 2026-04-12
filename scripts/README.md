@@ -2,21 +2,31 @@
 
 ## Main Script
 
-`send_real_count_db.py` — Runs YOLOv8 vehicle detection on the webcam and sends counts to the API.
+`run_parking.py` — Runs YOLOv8 vehicle detection with CLAHE preprocessing, matches detections to parking spaces via `spaces.json`, and sends occupancy counts + occupied space IDs to the API.
 
-## Development Mode
+## Disabling the Service
 
-The systemd service (`parking-detector.service`) runs this script automatically in production. It holds exclusive access to the camera, so you must stop it before running the script manually.
+The systemd service (`parking-detector.service`) runs `run_parking.py` automatically in production. You should disable it when:
+
+- **Editing `.py` files** — the service auto-restarts on crash and will run stale code
+- **Testing manually** — the service holds exclusive camera access, so manual runs will fail
+- **Debugging camera or detection issues** — run the script directly to see the preview window
 
 ```bash
 # Stop the service and prevent auto-start on reboot
 sudo systemctl disable --now parking-detector.service
-
-# Run the script manually
-python send_real_count_db.py
 ```
 
-## Back to Production
+## Running Manually
+
+```bash
+cd ~/Desktop/projects/ggc-parking-project/scripts
+/home/pi/Desktop/opencv_venv/bin/python3 run_parking.py
+```
+
+Set `SHOW_WINDOW=0` in `.env` to see the preview window with detection overlays.
+
+## Re-enabling the Service
 
 ```bash
 # Re-enable the service and start it

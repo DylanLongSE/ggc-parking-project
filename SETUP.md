@@ -14,16 +14,16 @@ Edit `scripts/.env` with the production values:
 - `PI_SHARED_SECRET` — shared secret from Railway env vars
 - `LOT_ID` — parking lot ID (default: `W`)
 - `SEND_INTERVAL` — seconds between API posts (default: `10`)
-- `SHOW_WINDOW` — set to `0` for headless (no display), `1` for preview window
+- `SHOW_WINDOW` — set to `1` for headless (no display), `0` for preview window
 
 ## 3. Test manually first
 
 ```bash
 cd scripts
-python send_real_count_db.py
+/home/pi/Desktop/opencv_venv/bin/python3 run_parking.py
 ```
 
-You should see `[OK] Sent count=... to ...` in the output. If you see `[WARN] INGESTION_TOKEN is empty`, check that `PI_SHARED_SECRET` is set in `.env`.
+You should see `[OK] Sent count=... to ...` in the output (only during 7am–7pm send window). If you see `[WARN] INGESTION_TOKEN is empty`, check that `PI_SHARED_SECRET` is set in `.env`.
 
 ## 4. Set up the systemd service (auto-start on boot)
 
@@ -50,3 +50,5 @@ sudo systemctl start parking-detector
 - The service starts automatically on boot
 - The `.env` file is gitignored — never commit secrets
 - To update the script: edit the code, then `sudo systemctl restart parking-detector`
+- Add `PYTHONUNBUFFERED=1` to the service `Environment=` line to see logs in real time via `journalctl`
+- For VNC preview support, add `DISPLAY=:0` to the service `Environment=` line
