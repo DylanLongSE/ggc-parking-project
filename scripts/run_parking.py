@@ -128,7 +128,7 @@ FRAME_W = int(os.getenv("FRAME_W", "640"))
 FRAME_H = int(os.getenv("FRAME_H", "360"))
 
 # UI / display
-SHOW_WINDOW = os.getenv("SHOW_WINDOW", "1") == "0"
+SHOW_WINDOW = os.getenv("SHOW_WINDOW", "0") == "0"
 WINDOW = "Parking Occupancy (q=quit)"
 
 
